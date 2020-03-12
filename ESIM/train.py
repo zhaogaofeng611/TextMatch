@@ -67,6 +67,11 @@ def main(train_file, dev_file, embeddings_file, vocab_file, target_dir,
         epochs_count = checkpoint["epochs_count"]
         train_losses = checkpoint["train_losses"]
         valid_losses = checkpoint["valid_losses"]
+     # Compute loss and accuracy before starting (or resuming) training.
+    _, valid_loss, valid_accuracy = validate(model, dev_loader, criterion)
+    print("\t* Validation loss before training: {:.4f}, accuracy: {:.4f}%".format(valid_loss, (valid_accuracy*100)))
+    # -------------------- Training epochs ------------------- #
+    print("\n", 20 * "=", "Training ESIM model on device: {}".format(device), 20 * "=")
     patience_counter = 0
     for epoch in range(start_epoch, epochs + 1):
         epochs_count.append(epoch)

@@ -150,6 +150,41 @@ def validate(model, dataloader, criterion):
     epoch_accuracy = running_accuracy / (len(dataloader.dataset))
     return epoch_time, epoch_loss, epoch_accuracy
 
+def test(model, dataloader):
+    """
+    Test the accuracy of a model on some labelled test dataset.
+    Args:
+        model: The torch module on which testing must be performed.
+        dataloader: A DataLoader object to iterate over some dataset.
+    Returns:
+        batch_time: The average time to predict the classes of a batch.
+        total_time: The total time to process the whole dataset.
+        accuracy: The accuracy of the model on the input data.
+    """
+    # Switch the model to eval mode.
+    model.eval()
+    device = model.device
+    time_start = time.time()
+    batch_time = 0.0
+    accuracy = 0.0
+    # Deactivate autograd for evaluation.
+    with torch.no_grad():
+        for (q, q_len, h, h_len, label) in dataloader:
+            batch_start = time.time()
+            # Move input and output data to the GPU if one is used.
+            q1 = q.to(device)
+            q1_lengths = q_len.to(device)
+            q2 = h.to(device)
+            q2_lengths = h_len.to(device)
+            labels = label.to(device)
+            _, probs = model(q1, q1_lengths, q2, q2_lengths)
+            accuracy += correct_predictions(probs, labels)
+            batch_time += time.time() - batch_start
+    batch_time /= len(dataloader)
+    total_time = time.time() - time_start
+    accuracy /= (len(dataloader.dataset))
+    return batch_time, total_time, accuracy
+
 def train(model, dataloader, optimizer, criterion, epoch_number, max_gradient_norm):
     """
     Train a model for one epoch on some input data with a given optimizer and
