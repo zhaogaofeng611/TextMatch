@@ -6,37 +6,24 @@ Created on Thu Mar 12 02:08:46 2020
 """
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import time
 from tqdm import tqdm
-
-def apply_multiple(x):
-    # input: batch_size * seq_len * (2 * hidden_size)
-    p1 = F.avg_pool1d(x.transpose(1, 2), x.size(1)).squeeze(-1)
-    p2 = F.max_pool1d(x.transpose(1, 2), x.size(1)).squeeze(-1)
-    # output: batch_size * (4 * hidden_size)
-    return torch.cat([p1, p2], 1)
 
 def sort_by_seq_lens(batch, sequences_lengths, descending=True):
     sorted_seq_lens, sorting_index = sequences_lengths.sort(0, descending=descending)
     sorted_batch = batch.index_select(0, sorting_index)
-    idx_range = sequences_lengths.new_tensor(torch.arange(0, len(sequences_lengths)))
+    idx_range = torch.arange(0, len(sequences_lengths)).type_as(sequences_lengths)
+    #idx_range = sequences_lengths.new_tensor(torch.arange(0, len(sequences_lengths)))
     _, revese_mapping = sorting_index.sort(0, descending=False)
     restoration_index = idx_range.index_select(0, revese_mapping)
     return sorted_batch, sorted_seq_lens, sorting_index, restoration_index
 
-def generate_sent_masks(enc_hiddens, source_lengths):
-    """ Generate sentence masks for encoder hidden states.
-    @param enc_hiddens (Tensor): encodings of shape (b, src_len, h), where b = batch size,
-                                 src_len = max source length, h = hidden size. 
-    @param source_lengths (List[int]): List of actual lengths for each of the sentences in the batch.len = batch size
-    @returns enc_masks (Tensor): Tensor of sentence masks of shape (b, src_len),
-                                where src_len = max source length, b = batch size.
-    """
-    enc_masks = torch.zeros(enc_hiddens.size(0), enc_hiddens.size(1), dtype=torch.float)
-    for e_id, src_len in enumerate(source_lengths):	
-        enc_masks[e_id, :src_len] = 1  
-    return enc_masks									
+def get_mask(sequences_batch, sequences_lengths):
+    batch_size = sequences_batch.size()[0]
+    max_length = torch.max(sequences_lengths)
+    mask = torch.ones(batch_size, max_length, dtype=torch.float)
+    mask[sequences_batch[:, :max_length] == 0] = 0.0
+    return mask									
 
 def masked_softmax(tensor, mask):
     """
@@ -142,39 +129,28 @@ def validate(model, dataloader, criterion):
     # Switch to evaluate mode.
     model.eval()
     device = model.device
-
     epoch_start = time.time()
     running_loss = 0.0
     running_accuracy = 0.0
-
     # Deactivate autograd for evaluation.
     with torch.no_grad():
-        for batch in dataloader:
+        for (q, q_len, h, h_len, label) in dataloader:
             # Move input and output data to the GPU if one is used.
-            q1 = batch["q1"].to(device)
-            q1_lengths = batch["q1_length"].to(device)
-            q2 = batch["q2"].to(device)
-            q2_lengths = batch["q2_length"].to(device)
-            labels = batch["label"].to(device)
-
+            q1 = q.to(device)
+            q1_lengths = q_len.to(device)
+            q2 = h.to(device)
+            q2_lengths = h_len.to(device)
+            labels = label.to(device)
             logits, probs = model(q1, q1_lengths, q2, q2_lengths)
             loss = criterion(logits, labels)
-
             running_loss += loss.item()
             running_accuracy += correct_predictions(probs, labels)
-
     epoch_time = time.time() - epoch_start
     epoch_loss = running_loss / len(dataloader)
     epoch_accuracy = running_accuracy / (len(dataloader.dataset))
-
     return epoch_time, epoch_loss, epoch_accuracy
 
-def train(model,
-          dataloader,
-          optimizer,
-          criterion,
-          epoch_number,
-          max_gradient_norm):
+def train(model, dataloader, optimizer, criterion, epoch_number, max_gradient_norm):
     """
     Train a model for one epoch on some input data with a given optimizer and
     criterion.
@@ -193,46 +169,32 @@ def train(model,
     # Switch the model to train mode.
     model.train()
     device = model.device
-
     epoch_start = time.time()
     batch_time_avg = 0.0
     running_loss = 0.0
     correct_preds = 0
-
     tqdm_batch_iterator = tqdm(dataloader)
-    for batch_index, batch in enumerate(tqdm_batch_iterator):
+    for batch_index, (q, q_len, h, h_len, label) in enumerate(tqdm_batch_iterator):
         batch_start = time.time()
-
         # Move input and output data to the GPU if it is used.
-        q1 = batch["q1"].to(device)
-        q1_lengths = batch["q1_length"].to(device)
-        q2 = batch["q2"].to(device)
-        q2_lengths = batch["q2_length"].to(device)
-        labels = batch["label"].to(device)
-
+        q1 = q.to(device)
+        q1_lengths = q_len.to(device)
+        q2 = h.to(device)
+        q2_lengths = h_len.to(device)
+        labels = label.to(device)
         optimizer.zero_grad()
-
-        logits, probs = model(q1,
-                              q1_lengths,
-                              q2,
-                              q2_lengths)
+        logits, probs = model(q1, q1_lengths, q2, q2_lengths)
         loss = criterion(logits, labels)
         loss.backward()
-
         nn.utils.clip_grad_norm_(model.parameters(), max_gradient_norm)
         optimizer.step()
-
         batch_time_avg += time.time() - batch_start
         running_loss += loss.item()
         correct_preds += correct_predictions(probs, labels)
-
         description = "Avg. batch proc. time: {:.4f}s, loss: {:.4f}"\
-                      .format(batch_time_avg/(batch_index+1),
-                              running_loss/(batch_index+1))
+                      .format(batch_time_avg/(batch_index+1), running_loss/(batch_index+1))
         tqdm_batch_iterator.set_description(description)
-
     epoch_time = time.time() - epoch_start
     epoch_loss = running_loss / len(dataloader)
     epoch_accuracy = correct_preds / len(dataloader.dataset)
-
     return epoch_time, epoch_loss, epoch_accuracy

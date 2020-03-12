@@ -6,7 +6,7 @@ Created on Thu Mar 12 02:08:03 2020
 """
 import torch
 import torch.nn as nn
-from utils import generate_sent_masks, replace_masked
+from utils import get_mask, replace_masked
 from layers import RNNDropout, Seq2SeqEncoder, SoftmaxAttention
 
 """
@@ -15,9 +15,9 @@ from layers import RNNDropout, Seq2SeqEncoder, SoftmaxAttention
 不具有学习参数的放在forward中使用nn.functional代替
 """
 class ESIM(nn.Module):
-    def __init__(self, embeding_dim, hihdden_size, embeddings, dropout=0.5, num_classes=2, device="gpu"):
+    def __init__(self, hihdden_size, embeddings, dropout=0.5, num_classes=2, device="gpu"):
         super(ESIM, self).__init__()
-        self.embedding_dim = embeding_dim
+        self.embedding_dim = embeddings.shape[1]
         self.hidden_size = hihdden_size
         self.num_classes = num_classes
         self.dropout = dropout
@@ -26,6 +26,7 @@ class ESIM(nn.Module):
         self.word_embedding.weight = nn.Parameter(torch.from_numpy(embeddings))
         self.word_embedding.float()
         self.word_embedding.weight.requires_grad = True
+        self.word_embedding.to(device)
         if self.dropout:
             self.rnn_dropout = RNNDropout(p=self.dropout)
         self.first_rnn = Seq2SeqEncoder(nn.LSTM, self.embedding_dim, self.hidden_size, bidirectional=True)
@@ -42,8 +43,8 @@ class ESIM(nn.Module):
                                             nn.Linear(self.hidden_size//2, self.num_classes))  
            
     def forward(self, q1, q1_lengths, q2, q2_lengths):
-        q1_mask = generate_sent_masks(q1, q1_lengths).to(self.device)
-        q2_mask = generate_sent_masks(q2, q2_lengths).to(self.device)
+        q1_mask = get_mask(q1, q1_lengths).to(self.device)
+        q2_mask = get_mask(q2, q2_lengths).to(self.device)
         q1_embed = self.word_embedding(q1)
         q2_embed = self.word_embedding(q2)
         if self.dropout:
