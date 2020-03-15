@@ -1,24 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Mar 12 02:09:43 2020
+Created on Thu Mar  5 13:27:48 2020
 
 @author: zhaog
 """
 import os
 import torch
+import argparse
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from data import LCQMC_Dataset, load_embeddings
-from utils import train, validate
-from model import ESIM
+from util import train, validate
+from model import RE2
 
-def main(train_file, dev_file, embeddings_file, vocab_file, target_dir, 
+def main(args, train_file, dev_file, embeddings_file, vocab_file, target_dir, 
          max_length=50,
-         hidden_size=300,
-         dropout=0.2,
-         num_classes=2,
          epochs=50,
-         batch_size=256,
+         batch_size=128,
          lr=0.0005,
          patience=5,
          max_grad_norm=10.0,
@@ -39,8 +37,7 @@ def main(train_file, dev_file, embeddings_file, vocab_file, target_dir,
     # -------------------- Model definition ------------------- #
     print("\t* Building model...")
     embeddings = load_embeddings(embeddings_file)
-    model = ESIM(hidden_size, embeddings=embeddings, dropout=dropout, 
-                 num_classes=num_classes, device=device).to(device)
+    model = RE2(args, embeddings, device=device).to(device)
     # -------------------- Preparation for training  ------------------- #
     criterion = nn.CrossEntropyLoss()
     # 过滤出需要梯度更新的参数
@@ -71,7 +68,7 @@ def main(train_file, dev_file, embeddings_file, vocab_file, target_dir,
     _, valid_loss, valid_accuracy, auc = validate(model, dev_loader, criterion)
     print("\t* Validation loss before training: {:.4f}, accuracy: {:.4f}%, auc: {:.4f}".format(valid_loss, (valid_accuracy*100), auc))
     # -------------------- Training epochs ------------------- #
-    print("\n", 20 * "=", "Training ESIM model on device: {}".format(device), 20 * "=")
+    print("\n", 20 * "=", "Training RE2 model on device: {}".format(device), 20 * "=")
     patience_counter = 0
     for epoch in range(start_epoch, epochs + 1):
         epochs_count.append(epoch)
@@ -82,10 +79,10 @@ def main(train_file, dev_file, embeddings_file, vocab_file, target_dir,
         print("-> Training time: {:.4f}s, loss = {:.4f}, accuracy: {:.4f}%"
               .format(epoch_time, epoch_loss, (epoch_accuracy*100)))
         print("* Validation for epoch {}:".format(epoch))
-        epoch_time, epoch_loss, epoch_accuracy, epoch_auc = validate(model, dev_loader, criterion)
+        epoch_time, epoch_loss, epoch_accuracy , epoch_auc= validate(model, dev_loader, criterion)
         valid_losses.append(epoch_loss)
         print("-> Valid. time: {:.4f}s, loss: {:.4f}, accuracy: {:.4f}%, auc: {:.4f}\n"
-              .format(epoch_time, epoch_loss, (epoch_accuracy * 100), epoch_auc))
+              .format(epoch_time, epoch_loss, (epoch_accuracy*100), epoch_auc))
         # Update the optimizer's learning rate with the scheduler.
         scheduler.step(epoch_accuracy)
         # Early stopping on validation accuracy.
@@ -101,7 +98,7 @@ def main(train_file, dev_file, embeddings_file, vocab_file, target_dir,
                         "train_losses": train_losses,
                         "valid_losses": valid_losses},
                         os.path.join(target_dir, "best.pth.tar"))
-        # Save the model at each epoch.
+
         torch.save({"epoch": epoch,
                     "model": model.state_dict(),
                     "best_score": best_score,
@@ -109,13 +106,30 @@ def main(train_file, dev_file, embeddings_file, vocab_file, target_dir,
                     "epochs_count": epochs_count,
                     "train_losses": train_losses,
                     "valid_losses": valid_losses},
-                    os.path.join(target_dir, "esim_{}.pth.tar".format(epoch)))
-        
+                   os.path.join(target_dir, "RE2_{}.pth.tar".format(epoch)))
+
         if patience_counter >= patience:
             print("-> Early stopping: patience limit reached, stopping...")
             break
     
 if __name__ == "__main__":
     
-    main("../data/LCQMC_train.csv","../data/LCQMC_dev.csv",
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dropout", default=0.2)
+    parser.add_argument("--embedding_dim", default=300)
+    parser.add_argument("--hidden_size", default=150)
+    parser.add_argument("--kernel_sizes", default=[3])
+    parser.add_argument("--blocks", default=2)
+    parser.add_argument("--fix_embeddings", default=True)
+    parser.add_argument("--encoder", default='cnn')
+    parser.add_argument("--enc_layers", default=2)
+    parser.add_argument("--alignment", default='linear')
+    parser.add_argument("--fusion", default='full')
+    parser.add_argument("--connection", default='aug')
+    parser.add_argument("--prediction", default='full')
+    parser.add_argument("--num_classes", default=2)
+    args = parser.parse_args()
+    
+    main(args, "../data/LCQMC_train.csv","../data/LCQMC_dev.csv",
          "../data/token_vec_300.bin", "../data/vocab.txt", "models")
+    

@@ -10,21 +10,18 @@ import time
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
 
-def sort_by_seq_lens(batch, sequences_lengths, descending=True):
-    sorted_seq_lens, sorting_index = sequences_lengths.sort(0, descending=descending)
-    sorted_batch = batch.index_select(0, sorting_index)
-    idx_range = torch.arange(0, len(sequences_lengths)).type_as(sequences_lengths)
-    #idx_range = sequences_lengths.new_tensor(torch.arange(0, len(sequences_lengths)))
-    _, revese_mapping = sorting_index.sort(0, descending=False)
-    restoration_index = idx_range.index_select(0, revese_mapping)
-    return sorted_batch, sorted_seq_lens, sorting_index, restoration_index
-
-def get_mask(sequences_batch, sequences_lengths):
-    batch_size = sequences_batch.size()[0]
-    max_length = torch.max(sequences_lengths)
-    mask = torch.ones(batch_size, max_length, dtype=torch.float)
-    mask[sequences_batch[:, :max_length] == 0] = 0.0
-    return mask									
+def generate_sent_masks(enc_hiddens, source_lengths):
+    """ Generate sentence masks for encoder hidden states.
+    @param enc_hiddens (Tensor): encodings of shape (b, src_len, h), where b = batch size,
+                                 src_len = max source length, h = hidden size. 
+    @param source_lengths (List[int]): List of actual lengths for each of the sentences in the batch.len = batch size
+    @returns enc_masks (Tensor): Tensor of sentence masks of shape (b, src_len),
+                                where src_len = max source length, b = batch size.
+    """
+    enc_masks = torch.zeros(enc_hiddens.size(0), enc_hiddens.size(1), dtype=torch.float)
+    for e_id, src_len in enumerate(source_lengths):	
+        enc_masks[e_id, :src_len] = 1  
+    return enc_masks								
 
 def masked_softmax(tensor, mask):
     """
@@ -74,27 +71,6 @@ def weighted_sum(tensor, weights, mask):
     mask = mask.expand_as(weighted_sum).contiguous().float()
 
     return weighted_sum * mask
-
-# Code inspired from:
-# https://github.com/allenai/allennlp/blob/master/allennlp/nn/util.py.
-def replace_masked(tensor, mask, value):
-    """
-    Replace the all the values of vectors in 'tensor' that are masked in
-    'masked' by 'value'.
-    Args:
-        tensor: The tensor in which the masked vectors must have their values
-            replaced.
-        mask: A mask indicating the vectors which must have their values
-            replaced.
-        value: The value to place in the masked vectors of 'tensor'.
-    Returns:
-        A new tensor of the same size as 'tensor' where the values of the
-        vectors masked in 'mask' were replaced by 'value'.
-    """
-    mask = mask.unsqueeze(1).transpose(2, 1)
-    reverse_mask = 1.0 - mask
-    values_to_add = value * reverse_mask
-    return tensor * mask + values_to_add
                
 def correct_predictions(output_probabilities, targets):
     """
@@ -148,7 +124,7 @@ def validate(model, dataloader, criterion):
             loss = criterion(logits, labels)
             running_loss += loss.item()
             running_accuracy += correct_predictions(probs, labels)
-            all_prob.extend(probs[:, 1].cpu().numpy())
+            all_prob.extend(probs[:,1].cpu().numpy())
             all_labels.extend(label)
     epoch_time = time.time() - epoch_start
     epoch_loss = running_loss / len(dataloader)
@@ -187,7 +163,7 @@ def test(model, dataloader):
             _, probs = model(q1, q1_lengths, q2, q2_lengths)
             accuracy += correct_predictions(probs, labels)
             batch_time += time.time() - batch_start
-            all_prob.extend(probs[:, 1].cpu().numpy())
+            all_prob.extend(probs[:,1].cpu().numpy())
             all_labels.extend(label)
     batch_time /= len(dataloader)
     total_time = time.time() - time_start
