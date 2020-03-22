@@ -36,6 +36,5 @@ Embeding：
 
 部分模型，借鉴了  
 https://github.com/alibaba-edu/simple-effective-text-matching-pytorch  
-https://github.com/Deep1994/ESIM-PyTorch  
 https://github.com/pengshuang/Text-Similarity  
 等项目。
